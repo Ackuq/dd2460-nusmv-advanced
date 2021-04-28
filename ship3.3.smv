@@ -79,12 +79,16 @@ MODULE Airlock(inner_door, outer_door,
     reset_inner : boolean;
     reset_outer : boolean;
 
-  -- Button is reset only if it is pressed and the door is open.
+  DEFINE
+    -- 3.3. Define generalised macros to check if either button (inside or outside) is pressed.
+    inner_buttons := inner_buttons_i | inner_buttons_o;
+    outer_buttons := outer_buttons_i | outer_buttons_o;
+
 
   ASSIGN
-    -- 3.3. check whether the inner or outer button of each variant is pressed
-    reset_inner := ((inner_buttons_i | inner_buttons_o) & inner_door = open);
-    reset_outer := ((outer_buttons_i | outer_buttons_o) & outer_door = open);
+    -- Button is reset only if it is pressed and the door is open.
+    reset_inner := (inner_buttons & inner_door = open);
+    reset_outer := (outer_buttons & outer_door = open);
 
   ASSIGN
     init(last_open) := none;
@@ -106,14 +110,14 @@ MODULE Airlock(inner_door, outer_door,
       case
         -- Specify when the door should open or close
 
-        (outer_buttons_i | outer_buttons_o):
+        outer_buttons:
             case
             -- If the outer door is closed and the inner door is closed and
             -- if either the inner buttons is not pressed or the inner buttons is pressed and opened last
             -- send open command
             outer_door = closed 
               & inner_door = closed 
-              & (!(inner_buttons_i | inner_buttons_o) | ((inner_buttons_i | inner_buttons_o) & last_open = inner)):
+              & (!inner_buttons | (inner_buttons & last_open = inner)):
                 open;
             -- If the button is pressed while door is opened, close it
             outer_door = open:
@@ -132,14 +136,14 @@ MODULE Airlock(inner_door, outer_door,
       case
         -- Specify when the door should open or close
 
-        (inner_buttons_i | inner_buttons_o):
+        inner_buttons:
             case
             -- If the inner door is closed and the outer door is closed and
             -- if either the outer buttons is not pressed or we did not open last
             -- send open command
             inner_door = closed 
               & outer_door = closed 
-              & ( !(outer_buttons_i | outer_buttons_o) | ((outer_buttons_i | outer_buttons_o) & last_open != inner)):
+              & ( !outer_buttons | (outer_buttons & last_open != inner)):
                 open;
 
             -- If the button is pressed while door is opened, close it
@@ -178,15 +182,13 @@ MODULE main
     outer_buttons_o: Button(airlock.reset_outer);
     outer_buttons_i: Button(airlock.reset_outer);
 
-    -- Generalized button values
-    inner_buttons.pressed : boolean;
-    outer_buttons.pressed : boolean;
 
     airlock : Airlock(inner_door.status, outer_door.status,
                 inner_buttons_i.pressed, inner_buttons_o.pressed, outer_buttons_i.pressed, 
                 outer_buttons_o.pressed, mode);
 
-  ASSIGN
+  DEFINE
+    -- 3.3. Define generalised macros to check if either button (inside or outside) is pressed.
     inner_buttons.pressed := inner_buttons_o.pressed | inner_buttons_i.pressed;
     outer_buttons.pressed := outer_buttons_o.pressed | outer_buttons_i.pressed;
 
