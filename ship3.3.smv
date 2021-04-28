@@ -139,7 +139,7 @@ MODULE Airlock(inner_door, outer_door,
             -- send open command
             inner_door = closed 
               & outer_door = closed 
-              & ( !(outer_buttons_i | inner_buttons_o) | ((outer_buttons_i | outer_buttons_o) & last_open != inner)):
+              & ( !(outer_buttons_i | outer_buttons_o) | ((outer_buttons_i | outer_buttons_o) & last_open != inner)):
                 open;
 
             -- If the button is pressed while door is opened, close it
