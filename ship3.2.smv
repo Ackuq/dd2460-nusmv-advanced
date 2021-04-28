@@ -58,8 +58,8 @@ MODULE Door(door_cmd, sensor)
   INVARSPEC (sensor = on & status = open -> status = open);
 
   -- REQ: The door should eventually be open
--- FAIRNESS
---     status = open
+FAIRNESS
+    status = open
 
 
 ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ LTLSPEC G ( (inner_buttons.pressed & outer_buttons.pressed)
 ---------------------------------------------------------------------------
 
 -- States where both sensors are off and none of the buttons are pressed cannot occurr infinietly often.
--- COMPASSION (count(inner_sensor = off, outer_sensor = off) = 2, count(inner_buttons.pressed, outer_buttons.pressed) = 0);
+COMPASSION (count(inner_sensor = off, outer_sensor = off) = 2, count(inner_buttons.pressed, outer_buttons.pressed) = 0);
 
 ---------------------------------------------------------------------------
 
