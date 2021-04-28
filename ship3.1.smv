@@ -208,14 +208,14 @@ LTLSPEC G ( outer_buttons.pressed -> F ( !outer_buttons.pressed ) )
   -- REQ: No pressed button can be reset until the door opens.
 
 -- Reset is always false until the door opens
-LTLSPEC G ( airlock.reset_inner = FALSE U (inner_door.status = open) )
-LTLSPEC G ( airlock.reset_outer = FALSE U (outer_door.status = open) )
+LTLSPEC G ( !airlock.reset_inner U (inner_door.status = open) )
+LTLSPEC G ( !airlock.reset_outer U (outer_door.status = open) )
 
   -- REQ: A button must be reset as soon as the door opens
 
--- If the door is open, the button must reset
-LTLSPEC G ( inner_door.status = open -> airlock.reset_inner = TRUE )
-LTLSPEC G ( outer_door.status = open -> airlock.reset_outer = TRUE )
+-- If the door opens (transitions from closed to open), the button must reset
+LTLSPEC G ( Y ( inner_door.status = closed ) & inner_door.status = open -> airlock.reset_inner )
+LTLSPEC G ( Y ( outer_door.status = closed ) & outer_door.status = open -> airlock.reset_outer )
 
   -- REQ: If both buttons are pressed, then first one door opens,
   -- followed by the other one
