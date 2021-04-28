@@ -1,0 +1,225 @@
+---------------------------------------------------------------------------
+-- BUTTON                                                                --
+---------------------------------------------------------------------------
+
+-- For each door there is a button to request service, that can be
+-- pressed. A pressed button stays pressed unless reset by the
+-- controller. A button that is not pressed can become pressed
+-- nondeterministically.
+
+MODULE Button(reset)
+  VAR
+    pressed : boolean;
+  ASSIGN
+    init(pressed) := FALSE;
+    next(pressed) :=
+      case
+        pressed & reset  : FALSE;
+        pressed & !reset : TRUE;
+        !pressed         : {FALSE,TRUE};
+      esac;
+
+  -- REQ: The controller must not reset a button that is not pressed.
+  INVARSPEC (reset -> pressed);
+
+---------------------------------------------------------------------------
+-- DOOR                                                                  --
+---------------------------------------------------------------------------
+
+-- Each airlock (entrance) is equipped with a set of double doors.
+-- Each door can receive either open, close or nop commands
+-- from the controller, and it responds opening, closing, or
+-- preserving the current state.
+
+MODULE Door(door_cmd)
+  VAR
+    status : { open, closed };
+
+  ASSIGN
+    init(status) := closed;
+    next(status) :=
+      case
+        door_cmd = open      : open;
+        door_cmd = close     : closed;
+        door_cmd = nop       : status;
+      esac;
+
+  -- REQ: The controller can issue an open command only if the door is closed.
+  INVARSPEC (door_cmd = open  -> status = closed);
+
+  -- REQ: The controller can issue a close command only if the door is open.
+  INVARSPEC (door_cmd = close -> status = open);
+
+  -- REQ: The door should eventually be open
+FAIRNESS
+    status = open
+
+
+---------------------------------------------------------------------------
+-- AIRLOCK                                                            --
+---------------------------------------------------------------------------
+
+-- The airlock has an inner and outer door, and a pair of buttons (on the
+-- inside and outside door) to request the door to open.
+-- For simplicity, the input of both buttons is merged.
+
+MODULE Airlock(inner_door, outer_door, inner_buttons, outer_buttons)
+  VAR
+    inner_door_cmd : {open, close, nop};
+    outer_door_cmd : {open, close, nop};
+    last_open : {inner, outer, none};
+    reset_inner : boolean;
+    reset_outer : boolean;
+
+  -- Button is reset only if it is pressed and the door is open.
+
+  ASSIGN
+    reset_inner := (inner_buttons & inner_door = open);
+    reset_outer := (outer_buttons & outer_door = open);
+
+  ASSIGN
+    init(last_open) := none;
+    next(last_open) :=
+      case
+        -- Specify which door was the last one that was open
+        -- If the inner door transitions from open to closed, we store it as the most recently opened
+        inner_door = closed & next(inner_door) = open:
+            inner;
+        -- If the outer door transitions from open to closed, we store it as the most recently opened
+        outer_door = closed & next(outer_door) = open:
+            outer;
+        TRUE:
+            last_open;
+      esac;
+
+  ASSIGN
+    outer_door_cmd :=
+      case
+        -- Specify when the door should open or close
+
+        -- Avoid scenarios where both buttons are pressed at the same time
+        outer_buttons = TRUE & inner_buttons = FALSE:
+            case
+            -- If the button is pressed while door is closed, open it
+            outer_door = closed & inner_door = closed & last_open != outer:
+                open;
+            -- If the button is pressed while door is opened, close it
+            outer_door = open:
+                close;
+
+            TRUE:
+                nop;
+            esac;
+        -- Otherwise, do no command
+        TRUE:
+            nop;
+      esac;
+
+  ASSIGN
+    inner_door_cmd :=
+      case
+        -- Specify when the door should open or close
+
+        -- Take precedence even if outer button is pressed
+        inner_buttons = TRUE:
+            case
+            -- If the button is pressed while door is closed, open it
+            inner_door = closed & outer_door = closed & last_open != inner:
+                open;
+            -- If the button is pressed while door is opened, close it
+            inner_door = open:
+                close;
+
+            TRUE:
+                nop;
+            esac;
+        -- Otherwise, do no command
+        TRUE:
+            nop;
+      esac;
+
+---------------------------------------------------------------------------
+-- MAIN                                                                  --
+---------------------------------------------------------------------------
+
+-- The main module shows the connection between modules.
+
+MODULE main
+  VAR
+    inner_door   : Door(airlock.inner_door_cmd);
+    outer_door   : Door(airlock.outer_door_cmd);
+    inner_buttons: Button(airlock.reset_inner);
+    outer_buttons: Button(airlock.reset_outer);
+    airlock : Airlock(inner_door.status, outer_door.status,
+                inner_buttons.pressed, outer_buttons.pressed);
+
+FAIRNESS
+  inner_buttons.pressed;
+
+FAIRNESS
+  outer_buttons.pressed;
+
+---------------------------------------------------------------------------
+-- REQUIREMENTS                                                          --
+---------------------------------------------------------------------------
+
+  -- The airlock controller must satisfy the following requirements.
+
+  -- REQ: Both doors are never open together
+
+LTLSPEC G ( count(inner_door.status = open, outer_door.status = open) <= 1 );
+
+
+  -- REQ: A door only opens if a button is pressed
+
+-- If inner door is opened, we need to have historically eventuelly pressed the button
+LTLSPEC G ( inner_door.status = open -> H ( F ( inner_buttons.pressed = TRUE ) ));
+
+-- If outer door is opened, we need to have historically eventuelly pressed the button
+LTLSPEC G ( outer_door.status = open -> H ( F ( outer_buttons.pressed = TRUE ) ));
+
+  -- REQ: If both buttons are pressed, the inner door should take precedence
+
+-- If both doors are closed and the buttons are pressed at the same time, the inner door should open if it wasn't last opened=
+LTLSPEC G ( (inner_door.status = closed & outer_door.status = closed & 
+                outer_buttons.pressed = TRUE & inner_buttons.pressed = TRUE & 
+                airlock.last_open != inner) 
+                -> F ( inner_door.status != next(inner_door.status) ) );
+
+  -- REQ: Both doors must eventually open (i.e., for either door,
+  -- there must eventually occur a state where it is open).
+
+-- The doors should eventually be opened, globally
+-- Ensured by fairness
+LTLSPEC G ( F ( inner_door.status = open ) )
+LTLSPEC G ( F ( outer_door.status = open ) )
+
+  -- REQ: No button can reach a state where it remains pressed forever.
+
+LTLSPEC G ( inner_buttons.pressed = TRUE -> F (inner_buttons.pressed = FALSE) )
+LTLSPEC G ( outer_buttons.pressed = TRUE -> F (outer_buttons.pressed = FALSE) )
+
+---------------------------------------------------------------------------
+-- Advanced properties for higher grades --
+---------------------------------------------------------------------------
+
+  -- REQ: No pressed button can be reset until the door opens.
+
+-- Reset is always false until the door opens
+LTLSPEC G ( airlock.reset_inner = FALSE U (inner_door.status = open) )
+LTLSPEC G ( airlock.reset_outer = FALSE U (outer_door.status = open) )
+
+  -- REQ: A button must be reset as soon as the door opens
+
+-- If the door is open, the button must reset
+LTLSPEC G ( inner_door.status = open -> airlock.reset_inner = TRUE )
+LTLSPEC G ( outer_door.status = open -> airlock.reset_outer = TRUE )
+
+  -- REQ: If both buttons are pressed, then first one door opens,
+  -- followed by the other one
+
+-- If both buttons are pressed, then eventually the inner door opens and eventually the outer door opens
+LTLSPEC G ( (inner_buttons.pressed & outer_buttons.pressed) 
+          -> F (inner_door.status = open) & F (outer_door.status = open) )
+
+---------------------------------------------------------------------------
