@@ -1,1 +1,0 @@
-# NuSMV advanced exercises

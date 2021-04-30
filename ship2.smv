@@ -186,7 +186,7 @@ LTLSPEC G ( outer_door.status = open -> H ( F ( outer_buttons.pressed ) ));
 LTLSPEC G ( (inner_door.status = closed & outer_door.status = closed & 
                 outer_buttons.pressed & inner_buttons.pressed & 
                 airlock.last_open != inner) 
-                -> F ( inner_door.status != next(inner_door.status) ) );
+                -> X ( inner_door.status = open ) );
 
   -- REQ: Both doors must eventually open (i.e., for either door,
   -- there must eventually occur a state where it is open).

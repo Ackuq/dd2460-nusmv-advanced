@@ -1,3 +1,8 @@
+--------------------------------------------------------------------------------------------------------
+-- 4.1. Mutate the model so that the outer door takes precedence instead of the inner                 --
+--------------------------------------------------------------------------------------------------------
+
+
 ---------------------------------------------------------------------------
 -- BUTTON                                                                --
 ---------------------------------------------------------------------------
@@ -16,11 +21,14 @@ MODULE Button(reset)
       case
         pressed & reset  : FALSE;
         pressed & !reset : TRUE;
-        !pressed         : {FALSE,TRUE};
+        -- 3.3.1 If not pressed but reset is true, set this to false anyway
+        !pressed & reset : FALSE;
+        !pressed & !reset : { TRUE, FALSE };
       esac;
 
   -- REQ: The controller must not reset a button that is not pressed.
-  INVARSPEC (reset -> pressed);
+  -- 3.3.1: A button may now reset event if it wasn't pressed before
+  -- INVARSPEC (reset -> pressed);
 
 ---------------------------------------------------------------------------
 -- DOOR                                                                  --
@@ -65,7 +73,10 @@ MODULE Door(door_cmd, sensor)
 -- inside and outside door) to request the door to open.
 -- For simplicity, the input of both buttons is merged.
 
-MODULE Airlock(inner_door, outer_door, inner_buttons, outer_buttons)
+MODULE Airlock(inner_door, outer_door, 
+                inner_buttons_i, inner_buttons_o, 
+                outer_buttons_i, outer_buttons_o,
+                mode)
   VAR
     inner_door_cmd : {open, close, nop};
     outer_door_cmd : {open, close, nop};
@@ -73,9 +84,28 @@ MODULE Airlock(inner_door, outer_door, inner_buttons, outer_buttons)
     reset_inner : boolean;
     reset_outer : boolean;
 
-  -- Button is reset only if it is pressed and the door is open.
+  DEFINE
+    -- 3.3 Define generalised macros to check if either button (inside or outside) is pressed.
+    inner_buttons := inner_buttons_i | inner_buttons_o;
+    outer_buttons := outer_buttons_i | outer_buttons_o;
+
+    -- 3.3.3 When in overheating mode, we only answer the inner buttons
+
+    inner_buttons_answer := case
+      mode = normal:
+        inner_buttons;
+      mode = overheating:
+        inner_buttons_i;
+    esac;
+    outer_buttons_answer := case
+      mode = normal:
+        outer_buttons;
+      mode = overheating:
+        outer_buttons_i;
+    esac;
 
   ASSIGN
+    -- Button is reset only if it is pressed and the door is open.
     reset_inner := (inner_buttons & inner_door = open);
     reset_outer := (outer_buttons & outer_door = open);
 
@@ -98,15 +128,17 @@ MODULE Airlock(inner_door, outer_door, inner_buttons, outer_buttons)
     outer_door_cmd :=
       case
         -- Specify when the door should open or close
-
-        outer_buttons:
+        -- 3.3.3. Answer only to inside button if mode = overheating
+        outer_buttons_answer:
             case
             -- If the outer door is closed and the inner door is closed and
             -- if either the inner buttons is not pressed or the inner buttons is pressed and opened last
             -- send open command
+
+            -- 4.1. The outer door takes precedence if both buttons are pressed
             outer_door = closed 
               & inner_door = closed 
-              & (!inner_buttons | (inner_buttons & last_open = inner)):
+              & (!inner_buttons_answer | (inner_buttons_answer & last_open != outer)):
                 open;
             -- If the button is pressed while door is opened, close it
             outer_door = open:
@@ -124,15 +156,17 @@ MODULE Airlock(inner_door, outer_door, inner_buttons, outer_buttons)
     inner_door_cmd :=
       case
         -- Specify when the door should open or close
-
-        inner_buttons:
+        -- 3.3.3. Answer only to inside button if mode = overheating
+        inner_buttons_answer:
             case
             -- If the inner door is closed and the outer door is closed and
             -- if either the outer buttons is not pressed or we did not open last
             -- send open command
+
+            -- 4.1. The outer door takes precedence if both buttons are pressed
             inner_door = closed 
               & outer_door = closed 
-              & ( !outer_buttons | (outer_buttons & last_open != inner)):
+              & ( !outer_buttons_answer | (outer_buttons_answer & last_open = outer)):
                 open;
 
             -- If the button is pressed while door is opened, close it
@@ -159,18 +193,35 @@ MODULE main
     inner_sensor : { on, off };
     outer_sensor : { on, off };
 
+    -- Thermostat
+    mode   : { normal, overheating };
+
     inner_door   : Door(airlock.inner_door_cmd, inner_sensor);
     outer_door   : Door(airlock.outer_door_cmd, outer_sensor);
-    inner_buttons: Button(airlock.reset_inner);
-    outer_buttons: Button(airlock.reset_outer);
+
+    -- Explicit buttons
+    inner_buttons_o: Button(airlock.reset_inner);
+    inner_buttons_i: Button(airlock.reset_inner);
+    outer_buttons_o: Button(airlock.reset_outer);
+    outer_buttons_i: Button(airlock.reset_outer);
+
+
     airlock : Airlock(inner_door.status, outer_door.status,
-                inner_buttons.pressed, outer_buttons.pressed);
+                inner_buttons_i.pressed, inner_buttons_o.pressed, outer_buttons_i.pressed, 
+                outer_buttons_o.pressed, mode);
+
+  DEFINE
+    -- 3.3. Define generalised macros to check if either button (inside or outside) is pressed.
+    inner_buttons.pressed := inner_buttons_o.pressed | inner_buttons_i.pressed;
+    outer_buttons.pressed := outer_buttons_o.pressed | outer_buttons_i.pressed;
 
 FAIRNESS
-  inner_buttons.pressed;
+  -- 3.3.6. Fairness property for inside button
+  inner_buttons_i.pressed;
 
 FAIRNESS
-  outer_buttons.pressed;
+  -- 3.3.6. Fairness property for inside button
+  outer_buttons_i.pressed;
 
 ---------------------------------------------------------------------------
 -- REQUIREMENTS                                                          --
@@ -194,8 +245,9 @@ LTLSPEC G ( outer_door.status = open -> H ( F ( outer_buttons.pressed ) ));
   -- REQ: If both buttons are pressed, the inner door should take precedence
 
 -- If both doors are closed and the buttons are pressed at the same time, the inner door should open if it wasn't last opened=
+-- 3.3.7. If both inside buttons are pressed, inner takes preceedence
 LTLSPEC G ( (inner_door.status = closed & outer_door.status = closed & 
-                outer_buttons.pressed & inner_buttons.pressed & 
+                outer_buttons_i.pressed & inner_buttons_i.pressed & 
                 airlock.last_open != inner) 
                 -> X ( inner_door.status = open ) );
 
@@ -219,8 +271,12 @@ LTLSPEC G ( outer_buttons.pressed -> F ( !outer_buttons.pressed ) )
   -- REQ: No pressed button can be reset until the door opens.
 
 -- Reset is always false until the door opens
-LTLSPEC G ( !airlock.reset_inner U (inner_door.status = open) )
-LTLSPEC G ( !airlock.reset_outer U (outer_door.status = open) )
+-- LTLSPEC G ( !airlock.reset_inner U (inner_door.status = open) )
+-- LTLSPEC G ( !airlock.reset_outer U (outer_door.status = open) )
+
+-- 3.3.8. A request from a pressed button remains active until the door opens or overheating occurs
+LTLSPEC G ( !airlock.reset_inner U ( inner_door.status = open | mode = overheating ) )
+LTLSPEC G ( !airlock.reset_outer U ( outer_door.status = open | mode = overheating ) )
 
   -- REQ: A button must be reset as soon as the door opens
 
@@ -253,308 +309,125 @@ LTLSPEC G ( ( outer_sensor = on & outer_door.status = open )
 
 -- States where both sensors are off and none of the buttons are pressed cannot occurr infinietly often.
 -- There must exist a state when the sensor is off and the button is pressed
-FAIRNESS (outer_sensor = off & outer_buttons.pressed) & (inner_sensor = off & inner_buttons.pressed)
+
+-- 3.3.6. The inside button is eventually pressed while sensor is off
+
+FAIRNESS (outer_sensor = off & outer_buttons_i.pressed) & (inner_sensor = off & inner_buttons_i.pressed)
+
 
 ---------------------------------------------------------------------------
-
+-- 4.1. Mutated model error trace                                        --
 ---------------------------------------------------------------------------
--- 3.2 Error trace --
----------------------------------------------------------------------------
-
-
--- If we remove the fairness properties for COMPASSION and FAIRNESS we get the following error trace:
 
 
 -- -- specification  G count(inner_door.status = open, outer_door.status = open) <= 1  is true
 -- -- specification  G (inner_door.status = open ->  H ( F inner_buttons.pressed))  is true
 -- -- specification  G (outer_door.status = open ->  H ( F outer_buttons.pressed))  is true
--- -- specification  G (((((inner_door.status = closed & outer_door.status = closed) & outer_buttons.pressed) & inner_buttons.pressed) & airlock.last_open != inner) ->  F inner_door.status != next(inner_door.status))  is true
--- -- specification  G ( F inner_door.status = open)  is false
+-- -- specification  G (((((inner_door.status = closed & outer_door.status = closed) & outer_buttons_i.pressed) & inner_buttons_i.pressed) & airlock.last_open != inner) ->  X inner_door.status = open)  is false
 -- -- as demonstrated by the following execution sequence
 -- Trace Description: LTL Counterexample 
 -- Trace Type: Counterexample 
 --   -> State: 1.1 <-
 --     inner_sensor = on
 --     outer_sensor = on
+--     mode = normal
 --     inner_door.status = closed
 --     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
+--     inner_buttons_o.pressed = FALSE
+--     inner_buttons_i.pressed = FALSE
+--     outer_buttons_o.pressed = FALSE
+--     outer_buttons_i.pressed = FALSE
 --     airlock.inner_door_cmd = nop
 --     airlock.outer_door_cmd = nop
 --     airlock.last_open = none
 --     airlock.reset_inner = FALSE
 --     airlock.reset_outer = FALSE
+--     outer_buttons.pressed = FALSE
+--     inner_buttons.pressed = FALSE
+--     airlock.outer_buttons_answer = FALSE
+--     airlock.inner_buttons_answer = FALSE
+--     airlock.outer_buttons = FALSE
+--     airlock.inner_buttons = FALSE
 --   -> State: 1.2 <-
---     outer_buttons.pressed = TRUE
+--     inner_buttons_i.pressed = TRUE
+--     outer_buttons_i.pressed = TRUE
 --     airlock.outer_door_cmd = open
---   -> State: 1.3 <-
---     outer_door.status = open
+--     outer_buttons.pressed = TRUE
 --     inner_buttons.pressed = TRUE
+--     airlock.outer_buttons_answer = TRUE
+--     airlock.inner_buttons_answer = TRUE
+--     airlock.outer_buttons = TRUE
+--     airlock.inner_buttons = TRUE
+--   -> State: 1.3 <-
+--     inner_sensor = off
+--     outer_sensor = off
+--     outer_door.status = open
 --     airlock.outer_door_cmd = close
 --     airlock.last_open = outer
 --     airlock.reset_outer = TRUE
 --   -- Loop starts here
 --   -> State: 1.4 <-
---     outer_buttons.pressed = FALSE
+--     inner_sensor = on
+--     outer_sensor = on
+--     outer_door.status = closed
+--     outer_buttons_i.pressed = FALSE
+--     airlock.inner_door_cmd = open
 --     airlock.outer_door_cmd = nop
 --     airlock.reset_outer = FALSE
+--     outer_buttons.pressed = FALSE
+--     airlock.outer_buttons_answer = FALSE
+--     airlock.outer_buttons = FALSE
 --   -> State: 1.5 <-
---     outer_buttons.pressed = TRUE
---     airlock.outer_door_cmd = close
---     airlock.reset_outer = TRUE
---   -> State: 1.6 <-
---     outer_buttons.pressed = FALSE
---     airlock.outer_door_cmd = nop
---     airlock.reset_outer = FALSE
--- -- specification  G ( F outer_door.status = open)  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 2.1 <-
---     inner_sensor = on
---     outer_sensor = on
---     inner_door.status = closed
---     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 2.2 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = open
---   -> State: 2.3 <-
---     inner_door.status = open
---     outer_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.last_open = inner
---     airlock.reset_inner = TRUE
---   -- Loop starts here
---   -> State: 2.4 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
---   -> State: 2.5 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.reset_inner = TRUE
---   -> State: 2.6 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
--- -- specification  G (inner_buttons.pressed ->  F !inner_buttons.pressed)  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 3.1 <-
---     inner_sensor = on
---     outer_sensor = on
---     inner_door.status = closed
---     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 3.2 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = open
---   -> State: 3.3 <-
---     inner_door.status = open
---     outer_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.last_open = inner
---     airlock.reset_inner = TRUE
---   -> State: 3.4 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
---   -> State: 3.5 <-
 --     inner_sensor = off
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.reset_inner = TRUE
---   -> State: 3.6 <-
---     inner_sensor = on
---     inner_door.status = closed
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = open
---     airlock.reset_inner = FALSE
---   -> State: 3.7 <-
---     outer_door.status = open
---     inner_buttons.pressed = TRUE
---     airlock.outer_door_cmd = close
---     airlock.last_open = outer
---     airlock.reset_outer = TRUE
---   -- Loop starts here
---   -> State: 3.8 <-
---     outer_buttons.pressed = FALSE
---     airlock.outer_door_cmd = nop
---     airlock.reset_outer = FALSE
---   -> State: 3.9 <-
---     outer_buttons.pressed = TRUE
---     airlock.outer_door_cmd = close
---     airlock.reset_outer = TRUE
---   -> State: 3.10 <-
---     outer_buttons.pressed = FALSE
---     airlock.outer_door_cmd = nop
---     airlock.reset_outer = FALSE
--- -- specification  G (outer_buttons.pressed ->  F !outer_buttons.pressed)  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 4.1 <-
---     inner_sensor = on
---     outer_sensor = on
---     inner_door.status = closed
---     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 4.2 <-
---     inner_buttons.pressed = TRUE
---     outer_buttons.pressed = TRUE
---     airlock.inner_door_cmd = open
---   -- Loop starts here
---   -> State: 4.3 <-
 --     inner_door.status = open
+--     outer_buttons_i.pressed = TRUE
 --     airlock.inner_door_cmd = close
 --     airlock.last_open = inner
 --     airlock.reset_inner = TRUE
---   -> State: 4.4 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
---   -> State: 4.5 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.reset_inner = TRUE
--- -- specification  G (!airlock.reset_inner U inner_door.status = open)  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 5.1 <-
---     inner_sensor = on
---     outer_sensor = on
---     inner_door.status = closed
---     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 5.2 <-
 --     outer_buttons.pressed = TRUE
+--     airlock.outer_buttons_answer = TRUE
+--     airlock.outer_buttons = TRUE
+--   -> State: 1.6 <-
+--     inner_sensor = on
+--     inner_door.status = closed
+--     inner_buttons_i.pressed = FALSE
+--     airlock.inner_door_cmd = nop
 --     airlock.outer_door_cmd = open
---   -> State: 5.3 <-
+--     airlock.reset_inner = FALSE
+--     inner_buttons.pressed = FALSE
+--     airlock.inner_buttons_answer = FALSE
+--     airlock.inner_buttons = FALSE
+--   -> State: 1.7 <-
+--     inner_sensor = off
+--     outer_sensor = off
 --     outer_door.status = open
---     inner_buttons.pressed = TRUE
+--     inner_buttons_i.pressed = TRUE
 --     airlock.outer_door_cmd = close
 --     airlock.last_open = outer
 --     airlock.reset_outer = TRUE
---   -- Loop starts here
---   -> State: 5.4 <-
---     outer_buttons.pressed = FALSE
---     airlock.outer_door_cmd = nop
---     airlock.reset_outer = FALSE
---   -> State: 5.5 <-
---     outer_buttons.pressed = TRUE
---     airlock.outer_door_cmd = close
---     airlock.reset_outer = TRUE
---   -> State: 5.6 <-
---     outer_buttons.pressed = FALSE
---     airlock.outer_door_cmd = nop
---     airlock.reset_outer = FALSE
--- -- specification  G (!airlock.reset_outer U outer_door.status = open)  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 6.1 <-
+--     inner_buttons.pressed = TRUE
+--     airlock.inner_buttons_answer = TRUE
+--     airlock.inner_buttons = TRUE
+--   -> State: 1.8 <-
 --     inner_sensor = on
 --     outer_sensor = on
---     inner_door.status = closed
 --     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 6.2 <-
---     inner_buttons.pressed = TRUE
+--     outer_buttons_i.pressed = FALSE
 --     airlock.inner_door_cmd = open
---   -> State: 6.3 <-
---     inner_door.status = open
---     outer_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.last_open = inner
---     airlock.reset_inner = TRUE
---   -- Loop starts here
---   -> State: 6.4 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
---   -> State: 6.5 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.reset_inner = TRUE
---   -> State: 6.6 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
+--     airlock.outer_door_cmd = nop
+--     airlock.reset_outer = FALSE
+--     outer_buttons.pressed = FALSE
+--     airlock.outer_buttons_answer = FALSE
+--     airlock.outer_buttons = FALSE
+-- -- specification  G ( F inner_door.status = open)  is true
+-- -- specification  G ( F outer_door.status = open)  is true
+-- -- specification  G (inner_buttons.pressed ->  F !inner_buttons.pressed)  is true
+-- -- specification  G (outer_buttons.pressed ->  F !outer_buttons.pressed)  is true
+-- -- specification  G (!airlock.reset_inner U (inner_door.status = open | mode = overheating))  is true
+-- -- specification  G (!airlock.reset_outer U (outer_door.status = open | mode = overheating))  is true
 -- -- specification  G (( Y inner_door.status = closed & inner_door.status = open) -> airlock.reset_inner)  is true
 -- -- specification  G (( Y outer_door.status = closed & outer_door.status = open) -> airlock.reset_outer)  is true
--- -- specification  G ((inner_buttons.pressed & outer_buttons.pressed) -> ( F inner_door.status = open &  F outer_door.status = open))  is false
--- -- as demonstrated by the following execution sequence
--- Trace Description: LTL Counterexample 
--- Trace Type: Counterexample 
---   -> State: 7.1 <-
---     inner_sensor = on
---     outer_sensor = on
---     inner_door.status = closed
---     outer_door.status = closed
---     inner_buttons.pressed = FALSE
---     outer_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.outer_door_cmd = nop
---     airlock.last_open = none
---     airlock.reset_inner = FALSE
---     airlock.reset_outer = FALSE
---   -> State: 7.2 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = open
---   -> State: 7.3 <-
---     inner_door.status = open
---     outer_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.last_open = inner
---     airlock.reset_inner = TRUE
---   -- Loop starts here
---   -> State: 7.4 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
---   -> State: 7.5 <-
---     inner_buttons.pressed = TRUE
---     airlock.inner_door_cmd = close
---     airlock.reset_inner = TRUE
---   -> State: 7.6 <-
---     inner_buttons.pressed = FALSE
---     airlock.inner_door_cmd = nop
---     airlock.reset_inner = FALSE
+-- -- specification  G ((inner_buttons.pressed & outer_buttons.pressed) -> ( F inner_door.status = open &  F outer_door.status = open))  is true
 -- -- specification  G ((inner_sensor = on & inner_door.status = open) -> next(inner_door.status) = open)  is true
 -- -- specification  G ((outer_sensor = on & outer_door.status = open) -> next(outer_door.status) = open)  is true
 -- -- invariant (door_cmd = open -> status = closed) IN inner_door is true
@@ -563,12 +436,10 @@ FAIRNESS (outer_sensor = off & outer_buttons.pressed) & (inner_sensor = off & in
 -- -- invariant (door_cmd = open -> status = closed) IN outer_door is true
 -- -- invariant (door_cmd = close -> status = open) IN outer_door is true
 -- -- invariant ((sensor = on & status = open) -> next(status) = open) IN outer_door is true
--- -- invariant (reset -> pressed) IN inner_buttons is true
--- -- invariant (reset -> pressed) IN outer_buttons is true
+
 
 ---------------------------------------------------------------------------
--- 3.2 Explanation --
+-- 4.1. Explanation                                                      --
 ---------------------------------------------------------------------------
--- The model fails because of the abscence of the fariness properties the doors may never go to the open state,
--- since one of the doors may open and then stay open forever since it is blocked from closing by the sensor.
--- The fairness property ensures that there will always exist a fair path so that each door will eventually close.
+
+-- We can see that from the error trace that if the outer door takes precedence, the property that states that the inner door should take precedence is false.s
