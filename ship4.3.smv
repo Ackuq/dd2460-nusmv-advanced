@@ -1,3 +1,7 @@
+--------------------------------------------------------------------------------------------------------
+-- 4.3. Correct model trace                                                                           --
+--------------------------------------------------------------------------------------------------------
+
 ---------------------------------------------------------------------------
 -- BUTTON                                                                --
 ---------------------------------------------------------------------------
@@ -303,3 +307,95 @@ LTLSPEC G ( ( outer_sensor = on & outer_door.status = open )
 -- 3.3.6. The inside button is eventually pressed while sensor is off
 
 FAIRNESS (outer_sensor = off & outer_buttons_i.pressed) & (inner_sensor = off & inner_buttons_i.pressed)
+
+
+---------------------------------------------------------------------------
+-- 4.2. Simultation trace                                                --
+---------------------------------------------------------------------------
+
+
+-- NuSMV > pick_state
+-- NuSMV > simulate -p
+-- ********  Simulation Starting From State 1.1   ********
+-- Trace Description: Simulation Trace 
+-- Trace Type: Simulation 
+--   -> State: 1.1 <-
+--     inner_sensor = on
+--     outer_sensor = on
+--     mode = normal
+--     inner_door.status = closed
+--     outer_door.status = closed
+--     inner_buttons_o.pressed = FALSE
+--     inner_buttons_i.pressed = FALSE
+--     outer_buttons_o.pressed = FALSE
+--     outer_buttons_i.pressed = FALSE
+--     airlock.inner_door_cmd = nop
+--     airlock.outer_door_cmd = nop
+--     airlock.last_open = none
+--     airlock.reset_inner = FALSE
+--     airlock.reset_outer = FALSE
+--     outer_buttons.pressed = FALSE
+--     inner_buttons.pressed = FALSE
+--     airlock.outer_buttons_answer = FALSE
+--     airlock.inner_buttons_answer = FALSE
+--     airlock.outer_buttons = FALSE
+--     airlock.inner_buttons = FALSE
+--   -> State: 1.2 <-
+--     mode = overheating
+--     inner_buttons_i.pressed = TRUE
+--     airlock.inner_door_cmd = open
+--     inner_buttons.pressed = TRUE
+--     airlock.inner_buttons_answer = TRUE
+--     airlock.inner_buttons = TRUE
+--   -> State: 1.3 <-
+--     mode = normal
+--     inner_door.status = open
+--     airlock.inner_door_cmd = close
+--     airlock.last_open = inner
+--     airlock.reset_inner = TRUE
+--   -> State: 1.4 <-
+--     inner_buttons_i.pressed = FALSE
+--     airlock.inner_door_cmd = nop
+--     airlock.reset_inner = FALSE
+--     inner_buttons.pressed = FALSE
+--     airlock.inner_buttons_answer = FALSE
+--     airlock.inner_buttons = FALSE
+--   -> State: 1.5 <-
+--     mode = overheating
+--     inner_buttons_o.pressed = TRUE
+--     inner_buttons_i.pressed = TRUE
+--     airlock.inner_door_cmd = close
+--     airlock.reset_inner = TRUE
+--     inner_buttons.pressed = TRUE
+--     airlock.inner_buttons_answer = TRUE
+--     airlock.inner_buttons = TRUE
+--   -> State: 1.6 <-
+--     mode = normal
+--     inner_buttons_o.pressed = FALSE
+--     inner_buttons_i.pressed = FALSE
+--     airlock.inner_door_cmd = nop
+--     airlock.reset_inner = FALSE
+--     inner_buttons.pressed = FALSE
+--     airlock.inner_buttons_answer = FALSE
+--     airlock.inner_buttons = FALSE
+--   -> State: 1.7 <-
+--     mode = overheating
+--     inner_buttons_o.pressed = TRUE
+--     inner_buttons_i.pressed = TRUE
+--     airlock.inner_door_cmd = close
+--     airlock.reset_inner = TRUE
+--     inner_buttons.pressed = TRUE
+--     airlock.inner_buttons_answer = TRUE
+--     airlock.inner_buttons = TRUE
+
+---------------------------------------------------------------------------
+-- 4.2. Explanation                                                      --
+---------------------------------------------------------------------------
+
+-- 1.1 (initial): In the initial state, we are in normal mode with all sensor on
+
+-- 1.2: The mode transitions to overheating and the inner button for inner door is pressed and command open is sent to inner door
+
+-- 1.3: The mode transitions to normal, the door open, and inner door button is reset, but, it cannot close since the sensor is on.
+
+-- 1.4: 
