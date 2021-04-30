@@ -404,4 +404,4 @@ FAIRNESS (outer_sensor = off & outer_buttons_i.pressed) & (inner_sensor = off & 
 
 -- 1.6: The mode is set to normal, nothing happens with the doors since the inner door is already open and sensors is on
 
--- 1.7: The mode is set to iverheating and both buttons are pressed
+-- 1.7: The mode is set to overheating and both buttons are pressed
