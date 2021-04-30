@@ -265,8 +265,8 @@ LTLSPEC G ( outer_buttons.pressed -> F ( !outer_buttons.pressed ) )
 -- LTLSPEC G ( !airlock.reset_outer U (outer_door.status = open) )
 
 -- 3.3.8. A request from a pressed button remains active until the door opens or overheating occurs
-LTLSPEC G ( inner_buttons.pressed -> F ( inner_door.status = open | mode = overheating ) )
-LTLSPEC G ( outer_buttons.pressed -> F ( outer_door.status = open | mode = overheating ) )
+LTLSPEC G ( !airlock.reset_inner U ( inner_door.status = open | mode = overheating ) )
+LTLSPEC G ( !airlock.reset_outer U ( outer_door.status = open | mode = overheating ) )
 
   -- REQ: A button must be reset as soon as the door opens
 
